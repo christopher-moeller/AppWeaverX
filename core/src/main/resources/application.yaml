@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: core
+  security:
+    oauth2:
+      client:
+        provider:
+          appweaverx-keycloak:
+            issuer-uri: http://localhost:8080/auth/realms/appweaverx-keycloak
+        registration:
+          keycloak:
+            provider: appweaverx-keycloak
+            authorization-grant-type: authorization_code
+            client-id: appweaverx-keycloak-confidential
+            client-secret: secret
+            scope: openid
+
+server:
+  port: 8081

@@ -2,49 +2,98 @@ package com.appweaverx;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
-import java.util.Optional;
 
 public class VueCompiler
 {
-    public static void main(String[] args) throws IOException, InterruptedException {
 
-        final Path vueUIModulePath = findVueUIModulePath()
-                .orElseThrow(() -> new RuntimeException("Could not find vue-ui module path"));
+    private final Path applicationModulePath;
+    private final Path vueUIModulePath;
 
-        buildVueApp(vueUIModulePath);
-        copyVueBuildToStatic(vueUIModulePath);
+    public VueCompiler(Path applicationModulePath, Path vueUIModulePath) {
+        this.applicationModulePath = applicationModulePath;
+        this.vueUIModulePath = vueUIModulePath;
     }
 
-    private static Optional<Path> findVueUIModulePath() {
-        final Class<?> rootClass = VueCompiler.class;
-        final URL resource = rootClass.getResource(rootClass.getSimpleName() + ".class");
-        if(resource == null) {
-            return Optional.empty();
+    public boolean hasVueSrcDirectory() {
+        return applicationModulePath.resolve("vue").toFile().exists();
+    }
+
+    public void createInitialVueProjectStructure() {
+        applicationModulePath.resolve("vue").toFile().mkdirs();
+
+        final Path vueSrcPath = vueUIModulePath.resolve("vue");
+        final Path vueTargetPath = applicationModulePath.resolve("vue");
+        try (var files = Files.walk(vueSrcPath)) {
+            files.forEach(source -> {
+                try {
+                    Path target = vueTargetPath.resolve(vueSrcPath.relativize(source));
+                    if (Files.isDirectory(source)) {
+                        Files.createDirectories(target);
+                    } else {
+                        Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                } catch (IOException e) {
+                    throw new RuntimeException("Failed to copy: " + source, e);
+                }
+            });
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
 
-        Path path = Path.of(resource.getPath());
-        while(path != null) {
-            File file = path.toFile();
-            if(file.getName().equals("vue-ui")) {
-                return Optional.of(path);
+    }
+
+    public void compile() {
+
+        try {
+            buildVueApp();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        try {
+            copyVueBuildToStatic();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public void install() {
+        try {
+            System.out.println("🔧 Running NPM install ...");
+
+            // Vue project folder
+            File vueFolder = new File(applicationModulePath.resolve("vue").toAbsolutePath().toString());
+
+            // Run "npm run build"
+            ProcessBuilder builder = new ProcessBuilder();
+            builder.directory(vueFolder);
+            builder.command("npm", "install");
+            builder.inheritIO(); // show logs in console
+
+            Process process = builder.start();
+            int exitCode = process.waitFor();
+
+            if (exitCode != 0) {
+                throw new RuntimeException("Vue install failed with exit code: " + exitCode);
             }
-            path = path.getParent();
-        }
 
-        return Optional.empty();
+            System.out.println("✅ Vue build completed!");
+        }catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    private static void buildVueApp(Path vueUIModulePath) throws IOException, InterruptedException {
+    private void buildVueApp() throws IOException, InterruptedException {
         System.out.println("🔧 Running Vue build...");
 
         // Vue project folder
-        File vueFolder = new File(vueUIModulePath.resolve("vue").toAbsolutePath().toString());
+        File vueFolder = new File(applicationModulePath.resolve("vue").toAbsolutePath().toString());
 
         // Run "npm run build"
         ProcessBuilder builder = new ProcessBuilder();
@@ -62,17 +111,17 @@ public class VueCompiler
         System.out.println("✅ Vue build completed!");
     }
 
-    private static void copyVueBuildToStatic(Path vueUIModulePath) throws IOException {
+    private void copyVueBuildToStatic() throws IOException {
         System.out.println("📂 Copying Vue build to static folder...");
 
         // Vue dist folder
-        Path vueDistPath = Paths.get(vueUIModulePath.resolve("vue").toAbsolutePath().toString(), "dist");
+        Path vueDistPath = Paths.get(applicationModulePath.resolve("vue").toAbsolutePath().toString(), "dist");
 
         // Spring Boot static folder
-        Path staticPath = Paths.get(vueUIModulePath.toAbsolutePath().toString(), "src", "main", "resources", "static");
+        Path staticPath = getStaticDirectory();
 
         // Thymeleaf templates folder
-        Path templatePath = Paths.get(vueUIModulePath.toAbsolutePath().toString(), "src", "main", "resources", "templates");
+        Path templatePath = getTemplatesDirectory();
 
         // Clear static folder before copying
         clearFolder(staticPath);
@@ -116,5 +165,28 @@ public class VueCompiler
                         });
             }
         }
+    }
+
+    public boolean hasCompiledSources() {
+        return folderIsNotEmpty(getStaticDirectory()) && folderIsNotEmpty(getTemplatesDirectory());
+    }
+
+    private boolean folderIsNotEmpty(Path folderPath) {
+        if (Files.exists(folderPath) && Files.isDirectory(folderPath)) {
+            try (var files = Files.list(folderPath)) {
+                return files.findAny().isPresent();
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to check folder: " + folderPath, e);
+            }
+        }
+        return false;
+    }
+
+    private Path getStaticDirectory() {
+        return Paths.get(applicationModulePath.toAbsolutePath().toString(), "src", "main", "resources", "static");
+    }
+
+    private Path getTemplatesDirectory() {
+        return Paths.get(applicationModulePath.toAbsolutePath().toString(), "src", "main", "resources", "templates");
     }
 }

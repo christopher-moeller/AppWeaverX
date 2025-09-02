@@ -1,4 +1,4 @@
-package org.example;
+package com.appweaverx;
 
 
 import org.springframework.boot.SpringApplication;
